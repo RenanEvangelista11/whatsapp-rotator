@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto'
 export async function GET() {
   const { data, error } = await supabase
     .from('wa_links')
-    .select('id, lid, pixel_id, initial_message, rotator, whatsapp_number, vendors, created_at')
+    .select('id, lid, description, initial_message, rotator, whatsapp_number, vendors, created_at')
     .order('created_at', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -14,10 +14,10 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { pixel_id, access_token, initial_message, rotator, whatsapp_number, vendors } = body ?? {}
+  const { description, initial_message, rotator, whatsapp_number, vendors } = body ?? {}
 
-  if (!pixel_id || !access_token || !initial_message) {
-    return NextResponse.json({ error: 'pixel_id, access_token e initial_message são obrigatórios' }, { status: 400 })
+  if (!initial_message) {
+    return NextResponse.json({ error: 'Informe a mensagem inicial' }, { status: 400 })
   }
   if (!rotator && !whatsapp_number) {
     return NextResponse.json({ error: 'whatsapp_number é obrigatório quando o rotator está desativado' }, { status: 400 })
@@ -36,8 +36,7 @@ export async function POST(req: NextRequest) {
 
   const { error } = await supabase.from('wa_links').insert({
     lid,
-    pixel_id,
-    access_token,
+    description: description?.trim() || '',
     initial_message,
     rotator: !!rotator,
     whatsapp_number: rotator ? null : whatsapp_number,

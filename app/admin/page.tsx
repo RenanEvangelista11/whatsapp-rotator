@@ -2,13 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-const UTM_TEMPLATE = `utm_source={{site_source_name}}&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&utm_id={{ad.id}}`
-
 type Vendor = { name: string; number: string; weight: number }
 type WaLink = {
   id: string
   lid: string
-  pixel_id: string
+  description: string
   initial_message: string
   rotator: boolean
   whatsapp_number: string | null
@@ -17,8 +15,7 @@ type WaLink = {
 }
 
 const EMPTY_FORM = {
-  pixel_id: '',
-  access_token: '',
+  description: '',
   initial_message: '',
   whatsapp_number: '',
   rotator: false,
@@ -47,42 +44,6 @@ function isValidPhone(masked: string) {
   return digits.length >= 12 && digits.length <= 13
 }
 
-function UtmBanner() {
-  const [copied, setCopied] = useState(false)
-  function copy() {
-    navigator.clipboard.writeText(UTM_TEMPLATE)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-  return (
-    <div className="mx-6 mt-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-1.5">
-            Template de UTMs para Meta Ads
-          </p>
-          <code className="block text-[11px] text-green-400 font-mono bg-black px-3 py-2 rounded-lg break-all leading-relaxed">
-            {UTM_TEMPLATE}
-          </code>
-          <p className="text-[11px] text-zinc-500 mt-1.5">
-            Cole no campo <strong>Parâmetros de URL</strong> do anúncio no Meta Ads.
-          </p>
-        </div>
-        <button
-          onClick={copy}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all border ${
-            copied
-              ? 'bg-green-950 text-green-400 border-green-800'
-              : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-green-600 hover:text-green-400'
-          }`}
-        >
-          {copied ? '✓ Copiado!' : '⎘ Copiar'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export default function AdminPage() {
   const [links, setLinks] = useState<WaLink[]>([])
   const [loading, setLoading] = useState(true)
@@ -90,7 +51,6 @@ export default function AdminPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [showToken, setShowToken] = useState(false)
   const [copied, setCopied] = useState('')
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
@@ -151,8 +111,6 @@ export default function AdminPage() {
     e.preventDefault()
     setError('')
 
-    if (!form.pixel_id.trim()) return setError('Informe o Pixel ID')
-    if (!form.access_token.trim()) return setError('Informe o Access Token')
     if (!form.initial_message.trim()) return setError('Informe a mensagem inicial')
 
     if (!form.rotator) {
@@ -169,8 +127,7 @@ export default function AdminPage() {
     setSaving(true)
     try {
       const body = {
-        pixel_id:        form.pixel_id.trim(),
-        access_token:    form.access_token.trim(),
+        description:     form.description.trim(),
         initial_message: form.initial_message.trim(),
         rotator:         form.rotator,
         whatsapp_number: form.rotator ? null : cleanPhone(form.whatsapp_number),
@@ -189,8 +146,8 @@ export default function AdminPage() {
       setForm(EMPTY_FORM)
       await loadLinks()
       setTimeout(() => copyLink(data.lid), 200)
-    } catch (e) {
-      setError(String(e))
+    } catch {
+      setError('Erro ao criar link. Tente novamente.')
     } finally {
       setSaving(false)
     }
@@ -199,7 +156,6 @@ export default function AdminPage() {
   function openModal() {
     setForm(EMPTY_FORM)
     setError('')
-    setShowToken(false)
     setShowModal(true)
   }
 
@@ -208,11 +164,8 @@ export default function AdminPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-green-400">⧉</span>
+          <span className="text-green-400 text-lg">⧉</span>
           <h1 className="text-zinc-100 font-semibold text-lg">Links WhatsApp</h1>
-          <span className="text-xs text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-800">
-            Rastreamento + CAPI
-          </span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -231,8 +184,6 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <UtmBanner />
-
       {/* Content */}
       <div className="flex-1 overflow-auto p-6">
         {loading ? (
@@ -241,11 +192,11 @@ export default function AdminPage() {
           <div className="flex flex-col items-center justify-center h-48 gap-4">
             <div className="text-center">
               <p className="text-zinc-400 font-medium">Nenhum link criado ainda</p>
-              <p className="text-zinc-600 text-sm mt-1">Crie um link para rastrear cliques no WhatsApp com a Meta CAPI</p>
+              <p className="text-zinc-600 text-sm mt-1">Crie um link para distribuir leads entre seus vendedores</p>
             </div>
             <button
               onClick={openModal}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-md transition-colors"
+              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-md transition-colors"
             >
               + Criar primeiro link
             </button>
@@ -269,41 +220,18 @@ export default function AdminPage() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 space-y-5">
-              {/* Pixel ID */}
+
+              {/* Descrição */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Pixel ID</label>
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Descrição</label>
                 <input
                   type="text"
-                  inputMode="numeric"
-                  value={form.pixel_id}
-                  onChange={(e) => setField('pixel_id', e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456789012345"
-                  maxLength={16}
+                  value={form.description}
+                  onChange={(e) => setField('description', e.target.value)}
+                  placeholder="Ex: Anúncio Instagram — Produto X — Campanha Maio"
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
                 />
-                <p className="text-xs text-zinc-600">Somente números, 15–16 dígitos</p>
-              </div>
-
-              {/* Access Token */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Access Token (Conversions API)</label>
-                <div className="relative">
-                  <input
-                    type={showToken ? 'text' : 'password'}
-                    value={form.access_token}
-                    onChange={(e) => setField('access_token', e.target.value)}
-                    placeholder="EAAxxxxxxxxxxxxxxx"
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowToken((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300 transition-colors text-xs"
-                  >
-                    {showToken ? '🙈' : '👁'}
-                  </button>
-                </div>
-                <p className="text-xs text-zinc-600">Token iniciado em EAA — nunca aparece na URL pública</p>
+                <p className="text-xs text-zinc-600">Onde este link está sendo usado (só você vê)</p>
               </div>
 
               {/* Mensagem inicial */}
@@ -315,6 +243,7 @@ export default function AdminPage() {
                   placeholder="Olá, vim pelo anúncio e gostaria de saber mais!"
                   rows={3}
                   maxLength={200}
+                  required
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors resize-none"
                 />
                 <p className="text-xs text-zinc-600 text-right">{form.initial_message.length}/200</p>
@@ -375,7 +304,7 @@ export default function AdminPage() {
                           placeholder="Nome"
                           className="bg-black border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
                         />
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 items-center">
                           <input
                             type="number"
                             value={v.weight}
@@ -385,7 +314,7 @@ export default function AdminPage() {
                             placeholder="%"
                             className="w-16 bg-black border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors text-center"
                           />
-                          <span className="flex items-center text-zinc-500 text-sm">%</span>
+                          <span className="text-zinc-500 text-sm">%</span>
                         </div>
                       </div>
                       <input
@@ -438,9 +367,7 @@ export default function AdminPage() {
   )
 }
 
-function LinkCard({
-  link, copied, baseUrl, onCopy, onDelete,
-}: {
+function LinkCard({ link, copied, baseUrl, onCopy, onDelete }: {
   link: WaLink
   copied: string
   baseUrl: string
@@ -455,7 +382,16 @@ function LinkCard({
     <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 hover:border-green-800/40 transition-colors">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0 space-y-2">
-          <p className="text-sm text-zinc-100 truncate">{link.initial_message}</p>
+
+          {/* Descrição */}
+          {link.description && (
+            <p className="text-xs text-zinc-400 font-medium">{link.description}</p>
+          )}
+
+          {/* Mensagem */}
+          <p className="text-sm text-zinc-200 truncate">{link.initial_message}</p>
+
+          {/* Destino */}
           <div className="flex items-center gap-2 flex-wrap">
             {link.rotator ? (
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -467,14 +403,16 @@ function LinkCard({
             ) : (
               <span className="text-xs text-zinc-500 font-mono">+{link.whatsapp_number}</span>
             )}
-            <span className="text-xs text-zinc-600">· Pixel {link.pixel_id}</span>
-            <span className="text-xs text-zinc-600">· {date}</span>
+            <span className="text-xs text-zinc-700">· {date}</span>
           </div>
+
+          {/* URL */}
           <div className="flex items-center gap-2 bg-black rounded-md px-2.5 py-1.5 border border-zinc-800">
             <span className="text-xs text-zinc-500 font-mono truncate flex-1">{url}</span>
             <a href={url} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-green-400 transition-colors shrink-0 text-xs">↗</a>
           </div>
         </div>
+
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={() => onCopy(link.lid)}

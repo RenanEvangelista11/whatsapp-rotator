@@ -14,8 +14,7 @@ export type Vendor = {
 export type WaLink = {
   id: string
   lid: string
-  pixel_id: string
-  access_token: string
+  description: string
   initial_message: string
   rotator: boolean
   whatsapp_number: string | null
