@@ -5,27 +5,20 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
-export type Seller = {
-  id: string
-  nome: string
-  whatsapp: string
-  ativo: boolean
-  criado_em: string
+export type Vendor = {
+  name: string
+  number: string
+  weight: number
 }
 
-export type Link = {
+export type WaLink = {
   id: string
-  slug: string
-  mensagem: string
-  total_cliques: number
-  criado_em: string
-}
-
-export type LinkSeller = {
-  id: string
-  link_id: string
-  seller_id: string
-  percentual: number
-  total_cliques: number
-  sellers?: Seller
+  lid: string
+  pixel_id: string
+  access_token: string
+  initial_message: string
+  rotator: boolean
+  whatsapp_number: string | null
+  vendors: Vendor[] | null
+  created_at: string
 }

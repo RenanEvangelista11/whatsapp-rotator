@@ -1,412 +1,498 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
-type Seller = { id: string; nome: string; whatsapp: string; ativo: boolean }
-type LinkSeller = { seller_id: string; percentual: number; total_cliques: number; sellers: Seller }
-type Link = { id: string; slug: string; mensagem: string; total_cliques: number; link_sellers: LinkSeller[] }
+const UTM_TEMPLATE = `utm_source={{site_source_name}}&utm_medium={{placement}}&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&utm_id={{ad.id}}`
+
+type Vendor = { name: string; number: string; weight: number }
+type WaLink = {
+  id: string
+  lid: string
+  pixel_id: string
+  initial_message: string
+  rotator: boolean
+  whatsapp_number: string | null
+  vendors: Vendor[] | null
+  created_at: string
+}
+
+const EMPTY_FORM = {
+  pixel_id: '',
+  access_token: '',
+  initial_message: '',
+  whatsapp_number: '',
+  rotator: false,
+  vendors: [
+    { name: '', number: '', weight: 50 },
+    { name: '', number: '', weight: 50 },
+  ],
+}
+
+function maskPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, 13)
+  if (!digits) return ''
+  let out = '+' + digits.slice(0, 2)
+  if (digits.length > 2) out += ' (' + digits.slice(2, 4)
+  if (digits.length > 4) out += ') ' + digits.slice(4, 9)
+  if (digits.length > 9) out += '-' + digits.slice(9, 13)
+  return out
+}
+
+function cleanPhone(masked: string) {
+  return masked.replace(/\D/g, '')
+}
+
+function isValidPhone(masked: string) {
+  const digits = cleanPhone(masked)
+  return digits.length >= 12 && digits.length <= 13
+}
+
+function UtmBanner() {
+  const [copied, setCopied] = useState(false)
+  function copy() {
+    navigator.clipboard.writeText(UTM_TEMPLATE)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <div className="mx-6 mt-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-1.5">
+            Template de UTMs para Meta Ads
+          </p>
+          <code className="block text-[11px] text-green-400 font-mono bg-black px-3 py-2 rounded-lg break-all leading-relaxed">
+            {UTM_TEMPLATE}
+          </code>
+          <p className="text-[11px] text-zinc-500 mt-1.5">
+            Cole no campo <strong>Parâmetros de URL</strong> do anúncio no Meta Ads.
+          </p>
+        </div>
+        <button
+          onClick={copy}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all border ${
+            copied
+              ? 'bg-green-950 text-green-400 border-green-800'
+              : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-green-600 hover:text-green-400'
+          }`}
+        >
+          {copied ? '✓ Copiado!' : '⎘ Copiar'}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 export default function AdminPage() {
-  const [sellers, setSellers] = useState<Seller[]>([])
-  const [links, setLinks] = useState<Link[]>([])
-  const [tab, setTab] = useState<'links' | 'sellers'>('links')
-
-  // Form vendedor
-  const [sellerNome, setSellerNome] = useState('')
-  const [sellerWA, setSellerWA] = useState('')
-
-  // Form link
-  const [linkSlug, setLinkSlug] = useState('')
-  const [linkMsg, setLinkMsg] = useState('Olá! Vim pelo link.')
-
-  // Form adicionar vendedor ao link
-  const [selectedLink, setSelectedLink] = useState<Link | null>(null)
-  const [addSellerId, setAddSellerId] = useState('')
-  const [addPercentual, setAddPercentual] = useState('')
+  const [links, setLinks] = useState<WaLink[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [copied, setCopied] = useState('')
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : ''
 
-  async function fetchAll() {
-    const [s, l] = await Promise.all([
-      fetch('/api/sellers').then((r) => r.json()),
-      fetch('/api/links').then((r) => r.json()),
-    ])
-    setSellers(Array.isArray(s) ? s : [])
-    setLinks(Array.isArray(l) ? l : [])
+  const loadLinks = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await fetch('/api/wa-links').then((r) => r.json())
+      setLinks(Array.isArray(data) ? data : [])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadLinks() }, [loadLinks])
+
+  async function copyLink(lid: string) {
+    await navigator.clipboard.writeText(`${baseUrl}/r?lid=${lid}`)
+    setCopied(lid)
+    setTimeout(() => setCopied(''), 2000)
   }
 
-  useEffect(() => { fetchAll() }, [])
+  async function handleDelete(lid: string) {
+    if (!confirm('Excluir este link?')) return
+    await fetch(`/api/wa-links/${lid}`, { method: 'DELETE' })
+    setLinks((prev) => prev.filter((l) => l.lid !== lid))
+  }
 
-  async function criarSeller(e: React.FormEvent) {
+  function setField(key: string, value: unknown) {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function setVendor(index: number, key: string, value: unknown) {
+    setForm((prev) => {
+      const vendors = [...prev.vendors]
+      vendors[index] = { ...vendors[index], [key]: value }
+      return { ...prev, vendors }
+    })
+  }
+
+  function addVendor() {
+    setForm((prev) => ({
+      ...prev,
+      vendors: [...prev.vendors, { name: '', number: '', weight: 0 }],
+    }))
+  }
+
+  function removeVendor(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      vendors: prev.vendors.filter((_, i) => i !== index),
+    }))
+  }
+
+  const vendorSum = form.vendors.reduce((s, v) => s + Number(v.weight || 0), 0)
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    await fetch('/api/sellers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nome: sellerNome, whatsapp: sellerWA }),
-    })
-    setSellerNome(''); setSellerWA('')
-    fetchAll()
+    setError('')
+
+    if (!form.pixel_id.trim()) return setError('Informe o Pixel ID')
+    if (!form.access_token.trim()) return setError('Informe o Access Token')
+    if (!form.initial_message.trim()) return setError('Informe a mensagem inicial')
+
+    if (!form.rotator) {
+      if (!isValidPhone(form.whatsapp_number)) return setError('Número de WhatsApp inválido. Use +55 (11) 99999-9999')
+    } else {
+      if (form.vendors.length < 2) return setError('Adicione pelo menos 2 vendedores')
+      for (const v of form.vendors) {
+        if (!v.name.trim()) return setError('Informe o nome de todos os vendedores')
+        if (!isValidPhone(v.number)) return setError(`Número inválido para "${v.name}"`)
+      }
+      if (vendorSum !== 100) return setError(`A soma dos percentuais deve ser 100% (atual: ${vendorSum}%)`)
+    }
+
+    setSaving(true)
+    try {
+      const body = {
+        pixel_id:        form.pixel_id.trim(),
+        access_token:    form.access_token.trim(),
+        initial_message: form.initial_message.trim(),
+        rotator:         form.rotator,
+        whatsapp_number: form.rotator ? null : cleanPhone(form.whatsapp_number),
+        vendors: form.rotator
+          ? form.vendors.map((v) => ({ name: v.name.trim(), number: cleanPhone(v.number), weight: Number(v.weight) }))
+          : null,
+      }
+      const res = await fetch('/api/wa-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.error); return }
+      setShowModal(false)
+      setForm(EMPTY_FORM)
+      await loadLinks()
+      setTimeout(() => copyLink(data.lid), 200)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSaving(false)
+    }
   }
 
-  async function toggleSeller(s: Seller) {
-    await fetch(`/api/sellers/${s.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ativo: !s.ativo }),
-    })
-    fetchAll()
+  function openModal() {
+    setForm(EMPTY_FORM)
+    setError('')
+    setShowToken(false)
+    setShowModal(true)
   }
-
-  async function deleteSeller(id: string) {
-    if (!confirm('Remover vendedor?')) return
-    await fetch(`/api/sellers/${id}`, { method: 'DELETE' })
-    fetchAll()
-  }
-
-  async function criarLink(e: React.FormEvent) {
-    e.preventDefault()
-    await fetch('/api/links', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug: linkSlug, mensagem: linkMsg }),
-    })
-    setLinkSlug(''); setLinkMsg('Olá! Vim pelo link.')
-    fetchAll()
-  }
-
-  async function deleteLink(id: string) {
-    if (!confirm('Remover link e todos os dados?')) return
-    await fetch(`/api/links/${id}`, { method: 'DELETE' })
-    setSelectedLink(null)
-    fetchAll()
-  }
-
-  async function adicionarVendedorNoLink(e: React.FormEvent) {
-    e.preventDefault()
-    if (!selectedLink) return
-    const res = await fetch('/api/link-sellers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        link_id: selectedLink.id,
-        seller_id: addSellerId,
-        percentual: Number(addPercentual),
-      }),
-    })
-    const data = await res.json()
-    if (!res.ok) { alert(data.error); return }
-    setAddSellerId(''); setAddPercentual('')
-    fetchAll()
-    // Atualiza o link selecionado com dados frescos
-    const links2 = await fetch('/api/links').then((r) => r.json())
-    setLinks(links2)
-    setSelectedLink(links2.find((l: Link) => l.id === selectedLink.id) ?? null)
-  }
-
-  async function removerVendedorDoLink(link_id: string, seller_id: string) {
-    await fetch('/api/link-sellers', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ link_id, seller_id }),
-    })
-    fetchAll()
-    const links2 = await fetch('/api/links').then((r) => r.json())
-    setLinks(links2)
-    setSelectedLink(links2.find((l: Link) => l.id === selectedLink?.id) ?? null)
-  }
-
-  const somaPercent = (link: Link) =>
-    (link.link_sellers ?? []).reduce((a, ls) => a + ls.percentual, 0)
-
-  const sellersNaoNoLink = (link: Link) =>
-    sellers.filter((s) => !link.link_sellers?.some((ls) => ls.seller_id === s.id))
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
-      <header className="bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-center gap-3">
-        <span className="text-2xl">📲</span>
-        <h1 className="text-xl font-bold">WhatsApp Rotator</h1>
-      </header>
-
-      <div className="max-w-5xl mx-auto p-6">
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6">
-          {(['links', 'sellers'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-5 py-2 rounded-lg font-medium transition-colors ${
-                tab === t
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-              }`}
-            >
-              {t === 'links' ? '🔗 Links' : '👥 Vendedores'}
-            </button>
-          ))}
+    <div className="flex flex-col h-screen bg-black text-white">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+        <div className="flex items-center gap-3">
+          <span className="text-green-400">⧉</span>
+          <h1 className="text-zinc-100 font-semibold text-lg">Links WhatsApp</h1>
+          <span className="text-xs text-zinc-500 bg-zinc-900 px-2 py-0.5 rounded-full border border-zinc-800">
+            Rastreamento + CAPI
+          </span>
         </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadLinks}
+            className="p-2 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900 transition-colors"
+            title="Atualizar"
+          >
+            ↻
+          </button>
+          <button
+            onClick={openModal}
+            className="flex items-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-md transition-colors"
+          >
+            + Novo Link
+          </button>
+        </div>
+      </div>
 
-        {/* TAB VENDEDORES */}
-        {tab === 'sellers' && (
-          <div className="space-y-6">
-            <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-              <h2 className="font-semibold mb-4 text-lg">Novo Vendedor</h2>
-              <form onSubmit={criarSeller} className="flex gap-3 flex-wrap">
-                <input
-                  className="bg-gray-800 rounded-lg px-4 py-2 flex-1 min-w-40 border border-gray-700 focus:outline-none focus:border-green-500"
-                  placeholder="Nome"
-                  value={sellerNome}
-                  onChange={(e) => setSellerNome(e.target.value)}
-                  required
-                />
-                <input
-                  className="bg-gray-800 rounded-lg px-4 py-2 flex-1 min-w-40 border border-gray-700 focus:outline-none focus:border-green-500"
-                  placeholder="WhatsApp (ex: 5511999999999)"
-                  value={sellerWA}
-                  onChange={(e) => setSellerWA(e.target.value)}
-                  required
-                />
-                <button
-                  type="submit"
-                  className="bg-green-600 hover:bg-green-500 px-5 py-2 rounded-lg font-medium transition-colors"
-                >
-                  Adicionar
-                </button>
-              </form>
-            </div>
+      <UtmBanner />
 
-            <div className="space-y-3">
-              {sellers.map((s) => (
-                <div
-                  key={s.id}
-                  className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4 flex items-center justify-between"
-                >
-                  <div>
-                    <p className="font-medium">{s.nome}</p>
-                    <p className="text-gray-400 text-sm">+{s.whatsapp}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => toggleSeller(s)}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                        s.ativo
-                          ? 'bg-green-900 text-green-300 hover:bg-green-800'
-                          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-                      }`}
-                    >
-                      {s.ativo ? '● Ativo' : '○ Inativo'}
-                    </button>
-                    <button
-                      onClick={() => deleteSeller(s.id)}
-                      className="text-red-400 hover:text-red-300 text-sm px-2"
-                    >
-                      Remover
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {sellers.length === 0 && (
-                <p className="text-gray-500 text-center py-8">Nenhum vendedor cadastrado</p>
-              )}
+      {/* Content */}
+      <div className="flex-1 overflow-auto p-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">Carregando...</div>
+        ) : links.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-48 gap-4">
+            <div className="text-center">
+              <p className="text-zinc-400 font-medium">Nenhum link criado ainda</p>
+              <p className="text-zinc-600 text-sm mt-1">Crie um link para rastrear cliques no WhatsApp com a Meta CAPI</p>
             </div>
+            <button
+              onClick={openModal}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 text-white text-sm rounded-md transition-colors"
+            >
+              + Criar primeiro link
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3 max-w-3xl">
+            {links.map((link) => (
+              <LinkCard key={link.lid} link={link} copied={copied} baseUrl={baseUrl} onCopy={copyLink} onDelete={handleDelete} />
+            ))}
           </div>
         )}
+      </div>
 
-        {/* TAB LINKS */}
-        {tab === 'links' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Coluna esquerda: formulário + lista de links */}
-            <div className="space-y-5">
-              <div className="bg-gray-900 rounded-xl p-5 border border-gray-800">
-                <h2 className="font-semibold mb-4 text-lg">Novo Link</h2>
-                <form onSubmit={criarLink} className="space-y-3">
-                  <input
-                    className="bg-gray-800 w-full rounded-lg px-4 py-2 border border-gray-700 focus:outline-none focus:border-green-500"
-                    placeholder="Slug (ex: vendas)"
-                    value={linkSlug}
-                    onChange={(e) => setLinkSlug(e.target.value)}
-                    required
-                  />
-                  <input
-                    className="bg-gray-800 w-full rounded-lg px-4 py-2 border border-gray-700 focus:outline-none focus:border-green-500"
-                    placeholder="Mensagem padrão do WhatsApp"
-                    value={linkMsg}
-                    onChange={(e) => setLinkMsg(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    className="w-full bg-green-600 hover:bg-green-500 py-2 rounded-lg font-medium transition-colors"
-                  >
-                    Criar Link
-                  </button>
-                </form>
-              </div>
-
-              <div className="space-y-3">
-                {links.map((link) => {
-                  const soma = somaPercent(link)
-                  const isSelected = selectedLink?.id === link.id
-                  return (
-                    <div
-                      key={link.id}
-                      onClick={() => setSelectedLink(isSelected ? null : link)}
-                      className={`bg-gray-900 border rounded-xl px-5 py-4 cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'border-green-500 bg-gray-800'
-                          : 'border-gray-800 hover:border-gray-600'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-mono font-semibold text-green-400">/{link.slug}</p>
-                          <p className="text-gray-500 text-xs mt-0.5 break-all">{baseUrl}/{link.slug}</p>
-                          <p className="text-gray-400 text-sm mt-1">
-                            {link.total_cliques} clique{link.total_cliques !== 1 ? 's' : ''}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <span
-                            className={`text-xs px-2 py-1 rounded-full ${
-                              soma === 100
-                                ? 'bg-green-900 text-green-300'
-                                : 'bg-yellow-900 text-yellow-300'
-                            }`}
-                          >
-                            {soma}%
-                          </span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); deleteLink(link.id) }}
-                            className="block mt-2 text-red-400 hover:text-red-300 text-xs"
-                          >
-                            Remover
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-                {links.length === 0 && (
-                  <p className="text-gray-500 text-center py-8">Nenhum link criado</p>
-                )}
-              </div>
+      {/* Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 sticky top-0 bg-zinc-950 z-10">
+              <h2 className="text-zinc-100 font-semibold text-sm">Novo Link WhatsApp</h2>
+              <button onClick={() => setShowModal(false)} className="text-zinc-500 hover:text-zinc-300 transition-colors">✕</button>
             </div>
 
-            {/* Coluna direita: detalhe do link selecionado */}
-            {selectedLink ? (
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-5 h-fit">
-                <div>
-                  <h2 className="font-semibold text-lg">
-                    /{selectedLink.slug}
-                  </h2>
+            <form onSubmit={handleSubmit} className="p-5 space-y-5">
+              {/* Pixel ID */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Pixel ID</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={form.pixel_id}
+                  onChange={(e) => setField('pixel_id', e.target.value.replace(/\D/g, ''))}
+                  placeholder="123456789012345"
+                  maxLength={16}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
+                />
+                <p className="text-xs text-zinc-600">Somente números, 15–16 dígitos</p>
+              </div>
+
+              {/* Access Token */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Access Token (Conversions API)</label>
+                <div className="relative">
+                  <input
+                    type={showToken ? 'text' : 'password'}
+                    value={form.access_token}
+                    onChange={(e) => setField('access_token', e.target.value)}
+                    placeholder="EAAxxxxxxxxxxxxxxx"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
+                  />
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${baseUrl}/${selectedLink.slug}`)
-                    }}
-                    className="text-xs text-green-400 hover:text-green-300 mt-1"
+                    type="button"
+                    onClick={() => setShowToken((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300 transition-colors text-xs"
                   >
-                    📋 Copiar link
+                    {showToken ? '🙈' : '👁'}
                   </button>
                 </div>
+                <p className="text-xs text-zinc-600">Token iniciado em EAA — nunca aparece na URL pública</p>
+              </div>
 
-                {/* Barra de progresso dos % */}
+              {/* Mensagem inicial */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Mensagem inicial</label>
+                <textarea
+                  value={form.initial_message}
+                  onChange={(e) => setField('initial_message', e.target.value)}
+                  placeholder="Olá, vim pelo anúncio e gostaria de saber mais!"
+                  rows={3}
+                  maxLength={200}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors resize-none"
+                />
+                <p className="text-xs text-zinc-600 text-right">{form.initial_message.length}/200</p>
+              </div>
+
+              {/* Rotator toggle */}
+              <div className="flex items-center justify-between py-2 border-t border-zinc-800">
                 <div>
-                  <div className="flex justify-between text-xs text-gray-400 mb-1">
-                    <span>Distribuição</span>
-                    <span>{somaPercent(selectedLink)}% / 100%</span>
-                  </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2 overflow-hidden flex">
-                    {(selectedLink.link_sellers ?? []).map((ls, i) => (
-                      <div
-                        key={ls.seller_id}
-                        style={{ width: `${ls.percentual}%` }}
-                        className={`h-2 ${
-                          ['bg-green-500', 'bg-blue-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500'][i % 5]
-                        }`}
-                      />
-                    ))}
-                  </div>
+                  <p className="text-sm text-zinc-200 font-medium">Rotator de vendedores</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Distribua os leads entre múltiplos números</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setField('rotator', !form.rotator)}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${form.rotator ? 'bg-green-600' : 'bg-zinc-700'}`}
+                >
+                  <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${form.rotator ? 'left-7' : 'left-1'}`} />
+                </button>
+              </div>
 
-                {/* Vendedores no link */}
-                <div className="space-y-2">
-                  {(selectedLink.link_sellers ?? []).map((ls) => (
-                    <div
-                      key={ls.seller_id}
-                      className="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3"
-                    >
-                      <div>
-                        <p className="font-medium text-sm">{ls.sellers?.nome}</p>
-                        <p className="text-gray-400 text-xs">{ls.total_cliques} cliques recebidos</p>
+              {/* Número único */}
+              {!form.rotator && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Número WhatsApp</label>
+                  <input
+                    type="tel"
+                    value={form.whatsapp_number}
+                    onChange={(e) => setField('whatsapp_number', maskPhone(e.target.value))}
+                    placeholder="+55 (11) 99999-9999"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
+                  />
+                </div>
+              )}
+
+              {/* Vendors */}
+              {form.rotator && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Vendedores</label>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${vendorSum === 100 ? 'bg-green-950 text-green-400' : 'bg-amber-950 text-amber-400'}`}>
+                      {vendorSum}% / 100%
+                    </span>
+                  </div>
+
+                  {form.vendors.map((v, i) => (
+                    <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500">Vendedor {i + 1}</span>
+                        {form.vendors.length > 2 && (
+                          <button type="button" onClick={() => removeVendor(i)} className="text-zinc-600 hover:text-red-400 transition-colors text-xs">✕</button>
+                        )}
                       </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-green-400 font-bold">{ls.percentual}%</span>
-                        <button
-                          onClick={() => removerVendedorDoLink(selectedLink.id, ls.seller_id)}
-                          className="text-red-400 hover:text-red-300 text-xs"
-                        >
-                          ✕
-                        </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          value={v.name}
+                          onChange={(e) => setVendor(i, 'name', e.target.value)}
+                          placeholder="Nome"
+                          className="bg-black border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="number"
+                            value={v.weight}
+                            onChange={(e) => setVendor(i, 'weight', e.target.value)}
+                            min={1}
+                            max={100}
+                            placeholder="%"
+                            className="w-16 bg-black border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors text-center"
+                          />
+                          <span className="flex items-center text-zinc-500 text-sm">%</span>
+                        </div>
                       </div>
+                      <input
+                        type="tel"
+                        value={v.number}
+                        onChange={(e) => setVendor(i, 'number', maskPhone(e.target.value))}
+                        placeholder="+55 (11) 99999-9999"
+                        className="w-full bg-black border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-green-500 transition-colors"
+                      />
                     </div>
                   ))}
-                  {(selectedLink.link_sellers ?? []).length === 0 && (
-                    <p className="text-gray-500 text-sm text-center py-3">
-                      Nenhum vendedor neste link
-                    </p>
-                  )}
+
+                  <button
+                    type="button"
+                    onClick={addVendor}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-zinc-700 rounded-lg text-zinc-500 hover:text-zinc-300 hover:border-green-600 text-sm transition-colors"
+                  >
+                    + Adicionar vendedor
+                  </button>
                 </div>
+              )}
 
-                {/* Adicionar vendedor */}
-                {sellersNaoNoLink(selectedLink).length > 0 && somaPercent(selectedLink) < 100 && (
-                  <form onSubmit={adicionarVendedorNoLink} className="space-y-2 border-t border-gray-700 pt-4">
-                    <p className="text-sm text-gray-400 font-medium">Adicionar vendedor</p>
-                    <select
-                      className="bg-gray-800 w-full rounded-lg px-4 py-2 border border-gray-700 focus:outline-none focus:border-green-500"
-                      value={addSellerId}
-                      onChange={(e) => setAddSellerId(e.target.value)}
-                      required
-                    >
-                      <option value="">Selecione o vendedor</option>
-                      {sellersNaoNoLink(selectedLink).map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.nome}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        max={100 - somaPercent(selectedLink)}
-                        className="bg-gray-800 flex-1 rounded-lg px-4 py-2 border border-gray-700 focus:outline-none focus:border-green-500"
-                        placeholder={`% (disponível: ${100 - somaPercent(selectedLink)}%)`}
-                        value={addPercentual}
-                        onChange={(e) => setAddPercentual(e.target.value)}
-                        required
-                      />
-                      <button
-                        type="submit"
-                        className="bg-green-600 hover:bg-green-500 px-4 py-2 rounded-lg font-medium transition-colors text-sm"
-                      >
-                        Adicionar
-                      </button>
-                    </div>
-                  </form>
-                )}
+              {error && (
+                <div className="bg-red-950 border border-red-800 rounded-md px-3 py-2 text-sm text-red-400">
+                  {error}
+                </div>
+              )}
 
-                {somaPercent(selectedLink) === 100 && (
-                  <p className="text-green-400 text-sm text-center">
-                    ✓ Link pronto — distribuição em 100%
-                  </p>
-                )}
+              <div className="flex gap-2 pt-1 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 rounded-md transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm rounded-md transition-colors font-medium"
+                >
+                  {saving ? 'Gerando...' : 'Gerar Link'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LinkCard({
+  link, copied, baseUrl, onCopy, onDelete,
+}: {
+  link: WaLink
+  copied: string
+  baseUrl: string
+  onCopy: (lid: string) => void
+  onDelete: (lid: string) => void
+}) {
+  const url = `${baseUrl}/r?lid=${link.lid}`
+  const isCopied = copied === link.lid
+  const date = new Date(link.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 hover:border-green-800/40 transition-colors">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0 space-y-2">
+          <p className="text-sm text-zinc-100 truncate">{link.initial_message}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {link.rotator ? (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs bg-green-950 text-green-400 px-2 py-0.5 rounded-full border border-green-900">Rotator</span>
+                {(link.vendors ?? []).map((v, i) => (
+                  <span key={i} className="text-xs text-zinc-500">{v.name} ({v.weight}%)</span>
+                ))}
               </div>
             ) : (
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center justify-center text-gray-500">
-                <p>Clique em um link para configurar os vendedores</p>
-              </div>
+              <span className="text-xs text-zinc-500 font-mono">+{link.whatsapp_number}</span>
             )}
+            <span className="text-xs text-zinc-600">· Pixel {link.pixel_id}</span>
+            <span className="text-xs text-zinc-600">· {date}</span>
           </div>
-        )}
+          <div className="flex items-center gap-2 bg-black rounded-md px-2.5 py-1.5 border border-zinc-800">
+            <span className="text-xs text-zinc-500 font-mono truncate flex-1">{url}</span>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-green-400 transition-colors shrink-0 text-xs">↗</a>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => onCopy(link.lid)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all border ${
+              isCopied
+                ? 'bg-green-950 text-green-400 border-green-800'
+                : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500'
+            }`}
+          >
+            {isCopied ? '✓ Copiado!' : '⎘ Copiar'}
+          </button>
+          <button
+            onClick={() => onDelete(link.lid)}
+            className="p-1.5 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-950 transition-colors"
+          >
+            🗑
+          </button>
+        </div>
       </div>
     </div>
   )
