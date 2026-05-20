@@ -23,13 +23,17 @@ export async function GET(request: NextRequest) {
 
   if (error || !link) return new Response('Link não encontrado', { status: 404 })
 
-  let number: string = link.whatsapp_number ?? ''
+  // Redirect simples para URL
+  if (link.redirect_url) {
+    return NextResponse.redirect(link.redirect_url, { status: 302 })
+  }
 
+  // Rotator ou número único WhatsApp
+  let number: string = link.whatsapp_number ?? ''
   if (link.rotator && Array.isArray(link.vendors) && link.vendors.length) {
     number = pickVendor(link.vendors as Vendor[]).number
   }
 
-  const waUrl = `https://wa.me/${number}?text=${encodeURIComponent(link.initial_message)}`
-
+  const waUrl = `https://wa.me/${number}?text=${encodeURIComponent(link.initial_message ?? '')}`
   return NextResponse.redirect(waUrl, { status: 302 })
 }

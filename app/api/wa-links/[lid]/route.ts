@@ -7,22 +7,35 @@ export async function PATCH(
 ) {
   const { lid } = await params
   const body = await req.json()
-  const { description, initial_message, rotator, whatsapp_number, vendors } = body ?? {}
+  const { description, initial_message, rotator, whatsapp_number, vendors, redirect_url } = body ?? {}
 
-  if (!initial_message) {
-    return NextResponse.json({ error: 'Informe a mensagem inicial' }, { status: 400 })
+  // Modo redirect simples
+  if (redirect_url) {
+    const { data, error } = await supabase
+      .from('wa_links')
+      .update({
+        description: description?.trim() || '',
+        redirect_url: redirect_url.trim(),
+        initial_message: '',
+        rotator: false,
+        whatsapp_number: null,
+        vendors: null,
+      })
+      .eq('lid', lid)
+      .select()
+      .single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json(data)
   }
-  if (!rotator && !whatsapp_number) {
-    return NextResponse.json({ error: 'whatsapp_number é obrigatório quando o rotator está desativado' }, { status: 400 })
-  }
-  if (rotator && (!Array.isArray(vendors) || vendors.length < 2)) {
+
+  // Modo WhatsApp
+  if (!initial_message) return NextResponse.json({ error: 'Informe a mensagem inicial' }, { status: 400 })
+  if (!rotator && !whatsapp_number) return NextResponse.json({ error: 'whatsapp_number é obrigatório' }, { status: 400 })
+  if (rotator && (!Array.isArray(vendors) || vendors.length < 2))
     return NextResponse.json({ error: 'O rotator exige pelo menos 2 vendedores' }, { status: 400 })
-  }
   if (rotator) {
     const total = (vendors as { weight: number }[]).reduce((s, v) => s + Number(v.weight || 0), 0)
-    if (total !== 100) {
-      return NextResponse.json({ error: `A soma dos percentuais deve ser 100% (atual: ${total}%)` }, { status: 400 })
-    }
+    if (total !== 100) return NextResponse.json({ error: `A soma dos percentuais deve ser 100% (atual: ${total}%)` }, { status: 400 })
   }
 
   const { data, error } = await supabase
@@ -33,6 +46,7 @@ export async function PATCH(
       rotator: !!rotator,
       whatsapp_number: rotator ? null : whatsapp_number,
       vendors: rotator ? vendors : null,
+      redirect_url: null,
     })
     .eq('lid', lid)
     .select()

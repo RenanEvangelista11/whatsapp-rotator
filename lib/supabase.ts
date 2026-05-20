@@ -15,9 +15,10 @@ export type WaLink = {
   id: string
   lid: string
   description: string
-  initial_message: string
+  initial_message: string | null
   rotator: boolean
   whatsapp_number: string | null
   vendors: Vendor[] | null
+  redirect_url: string | null
   created_at: string
 }
