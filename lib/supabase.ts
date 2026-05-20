@@ -11,6 +11,14 @@ export type Vendor = {
   weight: number
 }
 
+export type LandingConfig = {
+  title?: string
+  subtitle?: string
+  button_text?: string
+  button_color?: string
+  bg?: string
+}
+
 export type WaLink = {
   id: string
   lid: string
@@ -20,5 +28,7 @@ export type WaLink = {
   whatsapp_number: string | null
   vendors: Vendor[] | null
   redirect_url: string | null
+  landing: boolean
+  landing_config: LandingConfig | null
   created_at: string
 }

@@ -7,28 +7,17 @@ export async function PATCH(
 ) {
   const { lid } = await params
   const body = await req.json()
-  const { description, initial_message, rotator, whatsapp_number, vendors, redirect_url } = body ?? {}
+  const { description, initial_message, rotator, whatsapp_number, vendors, redirect_url, landing, landing_config } = body ?? {}
 
-  // Modo redirect simples
   if (redirect_url) {
     const { data, error } = await supabase
       .from('wa_links')
-      .update({
-        description: description?.trim() || '',
-        redirect_url: redirect_url.trim(),
-        initial_message: '',
-        rotator: false,
-        whatsapp_number: null,
-        vendors: null,
-      })
-      .eq('lid', lid)
-      .select()
-      .single()
+      .update({ description: description?.trim() || '', redirect_url: redirect_url.trim(), initial_message: '', rotator: false, whatsapp_number: null, vendors: null, landing: false, landing_config: null })
+      .eq('lid', lid).select().single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json(data)
   }
 
-  // Modo WhatsApp
   if (!initial_message) return NextResponse.json({ error: 'Informe a mensagem inicial' }, { status: 400 })
   if (!rotator && !whatsapp_number) return NextResponse.json({ error: 'whatsapp_number é obrigatório' }, { status: 400 })
   if (rotator && (!Array.isArray(vendors) || vendors.length < 2))
@@ -47,10 +36,10 @@ export async function PATCH(
       whatsapp_number: rotator ? null : whatsapp_number,
       vendors: rotator ? vendors : null,
       redirect_url: null,
+      landing: !!landing,
+      landing_config: landing ? (landing_config ?? null) : null,
     })
-    .eq('lid', lid)
-    .select()
-    .single()
+    .eq('lid', lid).select().single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json(data)
